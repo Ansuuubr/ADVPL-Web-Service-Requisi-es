@@ -1,0 +1,162 @@
+#INCLUDE 'totvs.ch'  //classes importadas do proprio totvs
+#INCLUDE 'parmtype.ch' //classes importadas do proprio totvs
+#INCLUDE 'restful.ch' //classes importadas do proprio totvs
+#INCLUDE 'protheus.ch' //classes importadas do proprio totvs
+
+
+WSRESTFUL CONSULTA DESCRIPTION "Meu Primeiro serviço REST!" //nome do rest dentro da pagina do web service e a descrição.
+	WSDATA cCodigo	    AS STRING
+	WSDATA cSerial	    AS STRING
+
+
+
+
+	WSMETHOD GET DESCRIPTION "Ola meu web service" WSSYNTAX "/CONSULTA/{codigo}" PATH "/CONSULTA/"  //metodo de requisição e descrição e caminho que vai ser usado
+END WSRESTFUL // fim do cabeçalho rest
+
+WSMETHOD GET WSRECEIVE cCodigo, cSerial WSSERVICE CONSULTA // começa a implementar o method e as consultas desse rest, estamos dizendo que cCodigo vai ser passada via URL pelo metodo GET
+
+//aqui vai receber ps dadps que vierem da url
+
+
+	Local cSerial    := self:CSERIAL //item que vem pela url http://192.168.1.3:xxxx/rest/CONSULTA?CSERIAL=00224515559
+	Local cCodigo    := self:CCODIGO //item que vem pela url http://192.168.1.3:xxxx/rest/CONSULTA?CCODIGO=1102S52US1
+	Local oResponse  := nil
+	Local cQuery 	 := ''
+	Local oStatement := nil
+	Local nSQLParam  := 0
+
+//verifica qual variavel esta vindo e uso a query correspondente
+	if(!empty(allTrim(cCodigo)))
+
+
+		cQuery += "SELECT B1_COD, B1_DESC, B2_QATU FROM "+RETSQLTAB("SB1")+" INNER JOIN "+ RETSQLTAB("SB2") +" ON SB1.B1_COD = SB2.B2_COD WHERE" + RETSQLFIL('SB1') +"AND"+ RETSQLFIL('SB2') + "AND SB1.D_E_L_E_T_ = '' AND SB2.D_E_L_E_T_ = ''"+ CRLF
+		cQuery += "AND SB1.B1_MSBLQL = 2 "+" AND B1_COD IN ( SELECT Z02_CODSP FROM"+ RETSQLTAB("Z02") +" WHERE "+"SB1.B1_FILIAL = Z02.Z02_FILIAL AND Z02.D_E_L_E_T_ = ''"+ CRLF
+		cQuery += " AND Z02_EQUIP = ? ) " + CRLF
+		cQuery += "ORDER By B1_DESC"
+
+	elseif (!empty(allTrim(cSerial)))
+		/// ve se a variavel cCodigo ou cSerial e passada dependendo de qual vir segue o caminho
+
+		cQuery += "SELECT AA3_CODPRO,AA3_NUMSER FROM "+RETSQLTAB("AA3")+ CRLF
+		cQuery += "WHERE AA3_NUMSER= ? "+ CRLF
+
+
+
+	ElseIf  SetRestFault( 400, EncodeUTF8("Deve ser informado equipamento ou serial para consulta") ) //caso cCodigo ou cSerial seja vazia mostra na tela o erro
+		RETURN .F.
+
+	EndIf
+
+///pode ser encrementada com mais elseif caso queira fazer outras consultas
+
+
+
+//pega o parametro que vem da url e seta na query onde tem o ? cada parametro que vem
+// e passado pelo nSQLparam++ on de começa em 0 e vai incrementando +1 exemplo 
+// parametro 1 primeiro item da url param 2 param++ 
+
+
+
+
+	oStatement := FWPreparedStatement():New()
+	oStatement:SetQuery(cQuery)
+	nSQLParam++ //implementa o contado do param para evitar sql inject , cada paramentro enviado ganhar um codigo , primneiro param 1 segundao param 2 assim sucessivamente.
+	// nesse caso so temos um parametro o codigo entao vai ser 1
+	if(!empty(allTrim(cCodigo)))
+
+		oStatement:SetString(nSQLParam, cCodigo)
+
+	elseif (!empty(allTrim(cSerial)))
+
+		oStatement:SetString(nSQLParam, cSerial)
+
+	ENDIF
+     //o if acima ajusta oque o nSQLparam vai receber
+    
+	cQuery := oStatement:GetFixQuery()
+	conout(cQuery)
+
+
+	oStatement:Destroy() //
+	oStatement := nil
+	cAliasSQL := MPSysOpenQuery(cQuery)
+
+
+	oResponse := JsonObject():New()//cria uma novo objeto json para receber o array oResponse
+
+
+
+
+
+
+
+	//conout(cCodigo)// mostra na tela o codigo que veio da variavel cCodigo pela url
+
+	//faz o looping para pegar todas as pecas do equipamento
+
+	//para usar o mesmo array de reposta pega o if e dependendo dele cria a requisição.
+	if(!empty(allTrim(cCodigo)))
+
+		oResponse['pecas'] := {} //esse array e criado para recever o array que vai vir do oCliente['']
+
+		Do While (cAliasSQL)->(!eof())
+
+
+			oCliente   := JsonObject():New() // cria um novo objeto json para receber os dados da query dentro do oCliente
+
+
+			//recebe os valores  que vem da query 	e monta o array do json
+			oCliente['codigo'] :=(cAliasSQL)->B1_COD
+			oCliente['desc'] :=EncodeUTF8(RTrim((cAliasSQL)->B1_DESC))
+			oCliente['qtdade'] :=(cAliasSQL)->B2_QATU
+
+
+			aAdd(oResponse['pecas'],oCliente) //estou adicionandi ao oResponse['pecas] tudo qeu o while do oCliente coletou
+
+			(cAliasSQL)->(dbSkip())//percorrre os cAliasSQL pulando de registro em registro
+		EndDo
+
+
+
+	ElseIf  (!empty(allTrim(cSerial)))
+
+		oResponse['codequi'] := {} //esse array e criado para recever o array que vai vir do oCliente['']
+
+		Do While (cAliasSQL)->(!eof())
+
+
+			oCliente   := JsonObject():New() // cria um novo objeto json para receber os dados da query dentro do oCliente
+
+
+			//recebe os valores  que vem da query 	e monta o array do json
+			oCliente['codpro'] :=EncodeUTF8(RTrim((cAliasSQL)->AA3_CODPRO))
+			oCliente['numser'] :=EncodeUTF8(RTrim((cAliasSQL)->AA3_NUMSER))
+
+
+
+			aAdd(oResponse['codequi'],oCliente) //estou adicionandi ao oResponse['pecas] tudo qeu o while do oCliente coletou
+
+			(cAliasSQL)->(dbSkip())//percorrre os cAliasSQL pulando de registro em registro
+		EndDo
+
+
+
+	ENDIF
+	//json to string
+
+	(cAliasSQL)->(dbCloseArea())// fecha o requisição que foi usada no cAliasSQL
+
+
+	//define tipo do retorno
+	::SetContentType('application/json')//cabeçalho para determinaro tip do arquivo nesse caso um json
+
+	//Define resposta
+
+	//::SetResponse(EncodeUTF8(cResponse))
+
+	::SetResponse(FWJsonSerialize(oResponse,.T.,.F.))// aqui onde vai pegar toda a resposta e passar para o JSON
+
+Return .T.
+
+//apos escrever o dados do web service 
